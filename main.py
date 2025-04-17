@@ -1,3 +1,4 @@
+from fastapi.staticfiles import StaticFiles
 from fastapi import FastAPI, Request, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -5,6 +6,7 @@ from send_to_telegram import forward_ticket
 import os
 
 app = FastAPI()
+app.mount("/", StaticFiles(directory="static", html=True), name="static")
 security = HTTPBasic()
 
 VALID_USERNAME = os.getenv("API_LOGIN", "demo_user")
