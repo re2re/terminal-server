@@ -7,22 +7,19 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from send_to_telegram import forward_ticket
 
-# --- Константы и блокировка для безопасной записи ---
 TERMINALS_FILE = "terminals.json"
 _lock = threading.Lock()
 
 app = FastAPI()
 
-# --- Статика ---
-# все файлы из static/ доступны по /static/...
+# === Статика ===
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# корень отдаёт наш frontend
 @app.get("/", response_class=FileResponse)
 async def root():
     return FileResponse(os.path.join("static", "index.html"))
 
-# --- Хелперы для работы с terminals.json ---
+# === Утилиты работы с файлами ===
 def load_terminals():
     if not os.path.exists(TERMINALS_FILE):
         return []
@@ -34,8 +31,7 @@ def save_terminals(terms):
         with open(TERMINALS_FILE, "w", encoding="utf-8") as f:
             json.dump(terms, f, ensure_ascii=False, indent=2)
 
-# --- Эндпоинты для терминалов ---
-
+# === CRUD для терминалов ===
 @app.get("/api/terminals")
 async def get_terminals():
     terms = load_terminals()
@@ -46,22 +42,15 @@ async def get_terminals():
 
 @app.post("/api/terminals/add")
 async def add_terminal(payload: dict):
-    term_id = payload.get("id")
-    login = payload.get("login")
+    term_id  = payload.get("id")
+    login    = payload.get("login")
     password = payload.get("password")
     if not (term_id and login and password):
         raise HTTPException(status_code=400, detail="id, login и password обязательны")
     terms = load_terminals()
     if any(t["id"] == term_id for t in terms):
         raise HTTPException(status_code=400, detail="Терминал с таким id уже существует")
-    new_term = {
-        "id": term_id,
-        "login": login,
-        "password": password,
-        "enabled": True,
-        "total": 0
-    }
-    terms.append(new_term)
+    terms.append({"id": term_id, "login": login, "password": password, "enabled": True, "total": 0})
     save_terminals(terms)
     return JSONResponse(content={"status": "ok"})
 
@@ -89,9 +78,27 @@ async def delete_terminal(payload: dict):
         raise HTTPException(status_code=404, detail="Терминал не найден")
     save_terminals(new_terms)
     return JSONResponse(content={"status": "ok"})
-
-# --- Эндпоинт тикетов с HTTP Basic авторизацией ---
-
+@app.post("/api/terminals/auth")
+async def auth_terminal(payload: dict):
+    """
+    Проверяет логин/пароль для терминала.
+    Ожидает JSON { id, login, password }.
+    Возвращает 200 OK либо 401 Unauthorized.
+    """
+    term_id  = payload.get("id")
+    login    = payload.get("login")
+    password = payload.get("password")
+    if not (term_id and login and password):
+        raise HTTPException(status_code=400, detail="id, login и password обязательны")
+    terms = load_terminals()
+    for t in terms:
+        if t["id"] == term_id:
+            if t["login"] == login and t["password"] == password:
+                return JSONResponse(content={"status": "ok"})
+            else:
+                raise HTTPException(status_code=401, detail="Неверный логин или пароль")
+    raise HTTPException(status_code=404, detail="Терминал не найден")
+# === Авторизация для тикетов ===
 security = HTTPBasic()
 VALID_USERNAME = os.getenv("API_LOGIN", "demo_user")
 VALID_PASSWORD = os.getenv("API_PASSWORD", "demo_pass")
@@ -105,8 +112,29 @@ def authenticate(credentials: HTTPBasicCredentials = Depends(security)):
         )
     return credentials.username
 
+# === Приём тикета и накопление total ===
 @app.post("/api/tickets")
 async def receive_ticket(ticket: dict, username: str = Depends(authenticate)):
-    print(f"[TICKET] Получен от {username}: {ticket}")
+    # 1) Пересылаем в Telegram
+    print(f"[TICKET] от {username}: {ticket}")
     await forward_ticket(ticket)
-    return JSONResponse(content={"status": "forwarded to Telegram"})
+
+    # 2) Накопление суммы
+    term_id = ticket.get("terminal_id")
+    amount  = ticket.get("amount", 0)
+    terms   = load_terminals()
+    updated = False
+
+    for t in terms:
+        if t["id"] == term_id:
+            # прибавляем к уже накопленному
+            t["total"] = t.get("total", 0) + amount
+            updated = True
+            break
+
+    if updated:
+        save_terminals(terms)
+    else:
+        print(f"⚠ Терминал {term_id} не найден в {TERMINALS_FILE}")
+
+    return JSONResponse(content={"status": "forwarded", "total_updated": updated})
