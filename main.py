@@ -7,20 +7,15 @@ import os
 
 app = FastAPI()
 
-# 1) Статика по URL /static
-app.mount(
-    "/static",
-    StaticFiles(directory="static"),
-    name="static",
-)
+# Serve static files under /static
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# 2) Корневой маршрут отдает index.html
+# Root route serves index.html
 @app.get("/", response_class=FileResponse)
 async def root():
     return FileResponse(os.path.join("static", "index.html"))
 
 security = HTTPBasic()
-
 VALID_USERNAME = os.getenv("API_LOGIN", "demo_user")
 VALID_PASSWORD = os.getenv("API_PASSWORD", "demo_pass")
 
@@ -39,9 +34,8 @@ async def receive_ticket(ticket: dict, username: str = Depends(authenticate)):
     await forward_ticket(ticket)
     return JSONResponse(content={"status": "forwarded to Telegram"})
 
-# NOTE: Реализуйте, если еще нет, следующие эндпоинты:
-# GET  /api/terminals         — вернуть список терминалов
-# POST /api/terminals/add     — добавить терминал: {id, login, password}
-# POST /api/terminals/toggle  — вкл/выкл терминал: {id}
-# POST /api/terminals/delete  — удалить терминал: {id}
-
+# TODO: Implement these API endpoints:
+# GET  /api/terminals
+# POST /api/terminals/add
+# POST /api/terminals/toggle
+# POST /api/terminals/delete
