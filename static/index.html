@@ -1,32 +1,127 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Управление терминалами</title>
   <style>
-    body { font-family: sans-serif; background: #121212; color: #fff; margin:0; padding:0; }
-    .toolbar { display: flex; justify-content: space-between; align-items: center; padding: 1rem; background: #1e1e1e; }
-    .toolbar .stats { font-size: 1rem; }
-    .toolbar button { padding: 0.5rem 1rem; border: none; border-radius: 6px; background: #156B2E; color: #fff; font-size: 1rem; cursor: pointer; }
-    .terminal-list { padding: 1rem; }
-    .terminal-item { background: #1e1e1e; border-radius: 8px; margin-bottom: 1rem; padding: 1rem; display: flex; align-items: center; position: relative; overflow: hidden; touch-action: pan-y; transition: transform 0.2s ease; }
-    .terminal-item.swiping { background: #800014; }
-    .terminal-item .state { width: 24px; margin-right: 1rem; font-size: 1.2rem; }
-    .terminal-item .id { flex: 1; margin-right: 1rem; word-break: break-all; }
-    .terminal-item .sum { margin-right: 1rem; }
-    .terminal-item .toggle-btn { padding: 0.4rem 0.8rem; border: none; border-radius: 6px; font-size: 1rem; cursor: pointer; background: #156B2E; }
-    /* Modal */
-    .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); justify-content: center; align-items: center; }
-    .modal { background: #1e1e1e; padding: 1rem; border-radius: 8px; width: 90%; max-width: 320px; }
-    .modal input { width: 100%; padding: 0.5rem; margin-bottom: 1rem; border: none; border-radius: 4px; font-size: 1rem; }
-    .modal .buttons { display: flex; justify-content: flex-end; }
-    .modal .btn { width: 40px; height: 40px; border: none; border-radius: 50%; margin-left: 0.5rem; font-size: 1.2rem; cursor: pointer; display: flex; justify-content: center; align-items: center; }
+    /* Базовая растяжка под весь экран */
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      width: 100%;
+      background: #121212;
+      color: #fff;
+      font-family: sans-serif;
+      display: flex;
+      flex-direction: column;
+    }
+    /* Тулбар сверху */
+    .toolbar {
+      flex: 0 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.75rem 1rem;
+      background: #1e1e1e;
+    }
+    .toolbar .stats {
+      font-size: 1rem;
+    }
+    .toolbar button {
+      padding: 0.5rem 1rem;
+      border: none;
+      border-radius: 6px;
+      background: #156B2E;
+      color: #fff;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+    /* Список терминалов — занимает всё остальное пространство */
+    .terminal-list {
+      flex: 1 1 auto;
+      overflow-y: auto;
+      padding: 1rem;
+    }
+    /* Карточка терминала */
+    .terminal-item {
+      display: flex;
+      align-items: center;
+      background: #1e1e1e;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+      padding: 1rem;
+      position: relative;
+      overflow: hidden;
+      touch-action: pan-y;
+      transition: transform 0.2s ease;
+    }
+    .terminal-item.swiping {
+      background: #800014;
+    }
+    .terminal-item .state {
+      width: 24px;
+      margin-right: 1rem;
+      font-size: 1.2rem;
+    }
+    .terminal-item .id {
+      flex: 1;
+      margin-right: 1rem;
+      font-weight: 500;
+      word-break: break-all;
+    }
+    .terminal-item .sum {
+      margin-right: 1rem;
+    }
+    .terminal-item .toggle-btn {
+      padding: 0.4rem 0.8rem;
+      border: none;
+      border-radius: 6px;
+      font-size: 1rem;
+      cursor: pointer;
+      background: #156B2E;
+    }
+    /* Модалка добавления */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0,0,0,0.7);
+      justify-content: center;
+      align-items: center;
+    }
+    .modal {
+      background: #1e1e1e;
+      padding: 1rem;
+      border-radius: 8px;
+      width: 90%; max-width: 320px;
+    }
+    .modal input {
+      width: 100%;
+      padding: 0.5rem;
+      margin-bottom: 1rem;
+      border: none;
+      border-radius: 4px;
+      font-size: 1rem;
+    }
+    .modal .buttons {
+      display: flex;
+      justify-content: flex-end;
+    }
+    .modal .btn {
+      width: 40px; height: 40px;
+      border: none; border-radius: 50%;
+      margin-left: 0.5rem;
+      font-size: 1.2rem;
+      cursor: pointer;
+      display: flex; justify-content: center; align-items: center;
+    }
     .modal .btn-cancel { background: #800014; color: #fff; }
-    .modal .btn-save { background: #156B2E; color: #fff; }
+    .modal .btn-save   { background: #156B2E; color: #fff; }
+    /* Адаптация под узкие экраны */
     @media (max-width: 480px) {
-      .toolbar { flex-direction: column; align-items: flex-start; }
-      .toolbar button { margin-top: 0.5rem; }
       .terminal-item { flex-direction: column; align-items: flex-start; }
       .terminal-item .toggle-btn { margin-top: 0.5rem; }
     }
@@ -37,7 +132,9 @@
     <div class="stats" id="stats">Загрузка...</div>
     <button id="addBtn">Добавить терминал</button>
   </div>
+
   <div class="terminal-list" id="terminalList"></div>
+
   <div class="modal-overlay" id="modalOverlay">
     <div class="modal">
       <input type="text" id="newId" placeholder="Номер терминала" />
@@ -45,26 +142,33 @@
       <input type="password" id="newPassword" placeholder="Пароль" />
       <div class="buttons">
         <button class="btn btn-cancel" id="cancelBtn">✖</button>
-        <button class="btn btn-save" id="saveBtn">✔</button>
+        <button class="btn btn-save"   id="saveBtn">✔</button>
       </div>
     </div>
   </div>
+
   <script>
     let terminals = [];
+
     async function loadTerminals() {
       try {
         const res = await fetch('/api/terminals');
         terminals = await res.json();
-      } catch (e) { terminals = []; }
+      } catch (e) {
+        terminals = [];
+      }
       renderTerminals();
-      loadStats();
+      updateStats();
     }
-    function loadStats() {
+
+    function updateStats() {
       const online = terminals.filter(t => t.enabled).length;
-      const total = terminals.length;
-      const sum = terminals.reduce((a, t) => a + (t.total || 0), 0);
-      document.getElementById('stats').textContent = `${online}/${total}, Сумма: ${sum} ₽`;
+      const total  = terminals.length;
+      const sum    = terminals.reduce((acc,t) => acc + (t.total||0), 0);
+      document.getElementById('stats').textContent =
+        `${online}/${total} онлайн, Сумма: ${sum} ₽`;
     }
+
     function renderTerminals() {
       const list = document.getElementById('terminalList');
       list.innerHTML = '';
@@ -74,29 +178,36 @@
         item.dataset.id = t.id;
         item.innerHTML = `
           <div class="state">${t.enabled ? '🟢' : '🔴'}</div>
-          <div class="id">${t.id}</div>
+          <div class="id">Терминал №${t.id}</div>
           <div class="sum">${t.total || 0} ₽</div>
-          <button class="toggle-btn">${t.enabled ? 'Отключить' : 'Подключить'}</button>
+          <button class="toggle-btn">
+            ${t.enabled ? 'Отключить' : 'Подключить'}
+          </button>
         `;
         item.querySelector('.toggle-btn').onclick = () => toggleTerminal(t.id);
         addSwipeHandler(item);
         list.appendChild(item);
       });
     }
+
     function addSwipeHandler(item) {
       let startX = 0, currentX = 0;
       const threshold = item.offsetWidth * 0.7;
+
       item.addEventListener('touchstart', e => {
         startX = e.touches[0].clientX;
         item.style.transition = 'none';
       });
+
       item.addEventListener('touchmove', e => {
         currentX = e.touches[0].clientX - startX;
         if (currentX < 0) {
           item.style.transform = `translateX(${currentX}px)`;
-          if (-currentX > threshold) item.classList.add('swiping'); else item.classList.remove('swiping');
+          if (-currentX > threshold) item.classList.add('swiping');
+          else item.classList.remove('swiping');
         }
       });
+
       item.addEventListener('touchend', async () => {
         item.style.transition = '';
         if (-currentX > threshold) {
@@ -107,25 +218,46 @@
         }
       });
     }
+
     async function toggleTerminal(id) {
-      await fetch('/api/terminals/toggle', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+      await fetch('/api/terminals/toggle', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({id})
+      });
       loadTerminals();
     }
+
     async function deleteTerminal(id) {
-      await fetch('/api/terminals/delete', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+      await fetch('/api/terminals/delete', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({id})
+      });
       loadTerminals();
     }
-    document.getElementById('addBtn').onclick = () => { document.getElementById('modalOverlay').style.display = 'flex'; };
-    document.getElementById('cancelBtn').onclick = () => { document.getElementById('modalOverlay').style.display = 'none'; };
+
+    document.getElementById('addBtn').onclick = () => {
+      document.getElementById('modalOverlay').style.display = 'flex';
+    };
+    document.getElementById('cancelBtn').onclick = () => {
+      document.getElementById('modalOverlay').style.display = 'none';
+    };
     document.getElementById('saveBtn').onclick = async () => {
-      const id = document.getElementById('newId').value.trim();
-      const login = document.getElementById('newLogin').value.trim();
+      const id       = document.getElementById('newId').value.trim();
+      const login    = document.getElementById('newLogin').value.trim();
       const password = document.getElementById('newPassword').value.trim();
       if (!id || !login || !password) return;
-      await fetch('/api/terminals/add', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,login,password})});
+      await fetch('/api/terminals/add', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({id, login, password})
+      });
       document.getElementById('modalOverlay').style.display = 'none';
       loadTerminals();
     };
+
+    // Инициализация
     loadTerminals();
   </script>
 </body>
