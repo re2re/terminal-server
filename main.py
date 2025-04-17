@@ -1,13 +1,23 @@
 from fastapi import FastAPI, Depends, HTTPException, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from send_to_telegram import forward_ticket
 import os
 
 app = FastAPI()
-# Serve static admin UI
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
+
+# 1) Статика по URL /static
+app.mount(
+    "/static",
+    StaticFiles(directory="static"),
+    name="static",
+)
+
+# 2) Корневой маршрут отдает index.html
+@app.get("/", response_class=FileResponse)
+async def root():
+    return FileResponse(os.path.join("static", "index.html"))
 
 security = HTTPBasic()
 
@@ -29,8 +39,9 @@ async def receive_ticket(ticket: dict, username: str = Depends(authenticate)):
     await forward_ticket(ticket)
     return JSONResponse(content={"status": "forwarded to Telegram"})
 
-# Убедитесь, что у вас есть реализация следующих эндпоинтов:
-# GET  /api/terminals
-# POST /api/terminals/add
-# POST /api/terminals/toggle
-# POST /api/terminals/delete
+# NOTE: Реализуйте, если еще нет, следующие эндпоинты:
+# GET  /api/terminals         — вернуть список терминалов
+# POST /api/terminals/add     — добавить терминал: {id, login, password}
+# POST /api/terminals/toggle  — вкл/выкл терминал: {id}
+# POST /api/terminals/delete  — удалить терминал: {id}
+
