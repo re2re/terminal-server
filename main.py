@@ -1,12 +1,14 @@
-from fastapi.staticfiles import StaticFiles
-from fastapi import FastAPI, Request, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.staticfiles import StaticFiles
 from send_to_telegram import forward_ticket
 import os
 
 app = FastAPI()
+# Serve static admin UI
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
+
 security = HTTPBasic()
 
 VALID_USERNAME = os.getenv("API_LOGIN", "demo_user")
@@ -26,3 +28,9 @@ async def receive_ticket(ticket: dict, username: str = Depends(authenticate)):
     print(f"[TICKET] Получен от {username}: {ticket}")
     await forward_ticket(ticket)
     return JSONResponse(content={"status": "forwarded to Telegram"})
+
+# Убедитесь, что у вас есть реализация следующих эндпоинтов:
+# GET  /api/terminals
+# POST /api/terminals/add
+# POST /api/terminals/toggle
+# POST /api/terminals/delete
