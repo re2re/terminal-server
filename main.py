@@ -5,6 +5,7 @@ from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.middleware.cors import CORSMiddleware
 from send_to_telegram import forward_ticket
 
 TERMINALS_FILE = "terminals.json"
@@ -12,14 +13,23 @@ _lock = threading.Lock()
 
 app = FastAPI()
 
-# === Статика ===
+# Enable CORS to allow browser requests from the frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],        # or specify your frontend domain
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# === Serve static files ===
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/", response_class=FileResponse)
 async def root():
     return FileResponse(os.path.join("static", "index.html"))
 
-# === Утилиты работы с файлами ===
+# Utilities for terminals.json
 def load_terminals():
     if not os.path.exists(TERMINALS_FILE):
         return []
@@ -31,7 +41,7 @@ def save_terminals(terms):
         with open(TERMINALS_FILE, "w", encoding="utf-8") as f:
             json.dump(terms, f, ensure_ascii=False, indent=2)
 
-# === CRUD для терминалов ===
+# CRUD endpoints for terminals
 @app.get("/api/terminals")
 async def get_terminals():
     terms = load_terminals()
@@ -78,27 +88,30 @@ async def delete_terminal(payload: dict):
         raise HTTPException(status_code=404, detail="Терминал не найден")
     save_terminals(new_terms)
     return JSONResponse(content={"status": "ok"})
+
 @app.post("/api/terminals/auth")
 async def auth_terminal(payload: dict):
-    """
-    Проверяет логин/пароль для терминала.
-    Ожидает JSON { id, login, password }.
-    Возвращает 200 OK либо 401 Unauthorized.
-    """
+    # Log incoming request for debugging
+    print(f"[AUTH_REQ] payload: {payload!r}")
     term_id  = payload.get("id")
     login    = payload.get("login")
     password = payload.get("password")
     if not (term_id and login and password):
+        print("[AUTH_REQ] missing fields")
         raise HTTPException(status_code=400, detail="id, login и password обязательны")
     terms = load_terminals()
     for t in terms:
         if t["id"] == term_id:
             if t["login"] == login and t["password"] == password:
-                return JSONResponse(content={"status": "ok"})
+                print(f"[AUTH_OK] terminal {term_id}")
+                return JSONResponse(content={"status": "ok", "id": term_id})
             else:
+                print(f"[AUTH_FAIL] bad credentials for {term_id}")
                 raise HTTPException(status_code=401, detail="Неверный логин или пароль")
+    print(f"[AUTH_FAIL] terminal {term_id} not found")
     raise HTTPException(status_code=404, detail="Терминал не найден")
-# === Авторизация для тикетов ===
+
+# Basic auth for /api/tickets
 security = HTTPBasic()
 VALID_USERNAME = os.getenv("API_LOGIN", "demo_user")
 VALID_PASSWORD = os.getenv("API_PASSWORD", "demo_pass")
@@ -112,29 +125,21 @@ def authenticate(credentials: HTTPBasicCredentials = Depends(security)):
         )
     return credentials.username
 
-# === Приём тикета и накопление total ===
 @app.post("/api/tickets")
 async def receive_ticket(ticket: dict, username: str = Depends(authenticate)):
-    # 1) Пересылаем в Telegram
     print(f"[TICKET] от {username}: {ticket}")
     await forward_ticket(ticket)
-
-    # 2) Накопление суммы
     term_id = ticket.get("terminal_id")
     amount  = ticket.get("amount", 0)
     terms   = load_terminals()
     updated = False
-
     for t in terms:
         if t["id"] == term_id:
-            # прибавляем к уже накопленному
             t["total"] = t.get("total", 0) + amount
             updated = True
             break
-
     if updated:
         save_terminals(terms)
     else:
         print(f"⚠ Терминал {term_id} не найден в {TERMINALS_FILE}")
-
     return JSONResponse(content={"status": "forwarded", "total_updated": updated})
