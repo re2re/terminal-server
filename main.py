@@ -1,25 +1,35 @@
 import os
 import json
 import threading
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.middleware.cors import CORSMiddleware
 from send_to_telegram import forward_ticket
 
 TERMINALS_FILE = "terminals.json"
 _lock = threading.Lock()
+connections = {}
 
 app = FastAPI()
 
-# === Статика ===
+# Enable CORS for all origins
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Serve static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/", response_class=FileResponse)
 async def root():
     return FileResponse(os.path.join("static", "index.html"))
 
-# === Утилиты работы с файлами ===
 def load_terminals():
     if not os.path.exists(TERMINALS_FILE):
         return []
@@ -31,7 +41,6 @@ def save_terminals(terms):
         with open(TERMINALS_FILE, "w", encoding="utf-8") as f:
             json.dump(terms, f, ensure_ascii=False, indent=2)
 
-# === CRUD для терминалов ===
 @app.get("/api/terminals")
 async def get_terminals():
     terms = load_terminals()
@@ -42,63 +51,64 @@ async def get_terminals():
 
 @app.post("/api/terminals/add")
 async def add_terminal(payload: dict):
-    term_id  = payload.get("id")
-    login    = payload.get("login")
+    term_id = payload.get("id")
+    login = payload.get("login")
     password = payload.get("password")
     if not (term_id and login and password):
-        raise HTTPException(status_code=400, detail="id, login и password обязательны")
+        raise HTTPException(400, "id, login и password обязательны")
     terms = load_terminals()
     if any(t["id"] == term_id for t in terms):
-        raise HTTPException(status_code=400, detail="Терминал с таким id уже существует")
+        raise HTTPException(400, "Терминал с таким id уже существует")
     terms.append({"id": term_id, "login": login, "password": password, "enabled": True, "total": 0})
     save_terminals(terms)
-    return JSONResponse(content={"status": "ok"})
+    return JSONResponse({"status": "ok"})
 
 @app.post("/api/terminals/toggle")
 async def toggle_terminal(payload: dict):
     term_id = payload.get("id")
     if term_id is None:
-        raise HTTPException(status_code=400, detail="id обязательны")
+        raise HTTPException(400, "id обязательны")
     terms = load_terminals()
     for t in terms:
         if t["id"] == term_id:
             t["enabled"] = not t.get("enabled", False)
             save_terminals(terms)
-            return JSONResponse(content={"status": "ok", "enabled": t["enabled"]})
-    raise HTTPException(status_code=404, detail="Терминал не найден")
+            return JSONResponse({"status": "ok", "enabled": t["enabled"]})
+    raise HTTPException(404, "Терминал не найден")
 
 @app.post("/api/terminals/delete")
 async def delete_terminal(payload: dict):
     term_id = payload.get("id")
     if term_id is None:
-        raise HTTPException(status_code=400, detail="id обязательны")
+        raise HTTPException(400, "id обязательны")
     terms = load_terminals()
     new_terms = [t for t in terms if t["id"] != term_id]
     if len(new_terms) == len(terms):
-        raise HTTPException(status_code=404, detail="Терминал не найден")
+        raise HTTPException(404, "Терминал не найден")
     save_terminals(new_terms)
-    return JSONResponse(content={"status": "ok"})
+    return JSONResponse({"status": "ok"})
+
 @app.post("/api/terminals/auth")
 async def auth_terminal(payload: dict):
-    """
-    Проверяет логин/пароль для терминала.
-    Ожидает JSON { id, login, password }.
-    Возвращает 200 OK либо 401 Unauthorized.
-    """
-    term_id  = payload.get("id")
-    login    = payload.get("login")
+    print(f"[AUTH_REQ] payload: {payload!r}")
+    term_id = payload.get("id")
+    login = payload.get("login")
     password = payload.get("password")
     if not (term_id and login and password):
-        raise HTTPException(status_code=400, detail="id, login и password обязательны")
+        print("[AUTH_REQ] missing fields")
+        raise HTTPException(400, "id, login и password обязательны")
     terms = load_terminals()
     for t in terms:
         if t["id"] == term_id:
             if t["login"] == login and t["password"] == password:
-                return JSONResponse(content={"status": "ok"})
+                print(f"[AUTH_OK] terminal {term_id}")
+                return JSONResponse({"status": "ok", "id": term_id})
             else:
-                raise HTTPException(status_code=401, detail="Неверный логин или пароль")
-    raise HTTPException(status_code=404, detail="Терминал не найден")
-# === Авторизация для тикетов ===
+                print(f"[AUTH_FAIL] bad credentials for {term_id}")
+                raise HTTPException(401, "Неверный логин или пароль")
+    print(f"[AUTH_FAIL] terminal {term_id} not found")
+    raise HTTPException(404, "Терминал не найден")
+
 security = HTTPBasic()
 VALID_USERNAME = os.getenv("API_LOGIN", "demo_user")
 VALID_PASSWORD = os.getenv("API_PASSWORD", "demo_pass")
@@ -106,35 +116,42 @@ VALID_PASSWORD = os.getenv("API_PASSWORD", "demo_pass")
 def authenticate(credentials: HTTPBasicCredentials = Depends(security)):
     if credentials.username != VALID_USERNAME or credentials.password != VALID_PASSWORD:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Неверный логин или пароль",
+            status.HTTP_401_UNAUTHORIZED,
+            "Неверный логин или пароль",
             headers={"WWW-Authenticate": "Basic"},
         )
     return credentials.username
 
-# === Приём тикета и накопление total ===
 @app.post("/api/tickets")
 async def receive_ticket(ticket: dict, username: str = Depends(authenticate)):
-    # 1) Пересылаем в Telegram
     print(f"[TICKET] от {username}: {ticket}")
     await forward_ticket(ticket)
-
-    # 2) Накопление суммы
     term_id = ticket.get("terminal_id")
-    amount  = ticket.get("amount", 0)
-    terms   = load_terminals()
+    amount = ticket.get("amount", 0)
+    terms = load_terminals()
     updated = False
-
     for t in terms:
         if t["id"] == term_id:
-            # прибавляем к уже накопленному
             t["total"] = t.get("total", 0) + amount
             updated = True
             break
-
     if updated:
         save_terminals(terms)
     else:
-        print(f"⚠ Терминал {term_id} не найден в {TERMINALS_FILE}")
+        print(f"⚠ Терминал {term_id} не найден")
+    return JSONResponse({"status": "forwarded", "total_updated": updated})
 
-    return JSONResponse(content={"status": "forwarded", "total_updated": updated})
+@app.websocket("/ws/{term_id}")
+async def websocket_endpoint(websocket: WebSocket, term_id: str):
+    await websocket.accept()
+    connections[term_id] = websocket
+    print(f"[WS_CONNECTED] {term_id}")
+    try:
+        while True:
+            data = await websocket.receive_text()
+            if data == "ping":
+                await websocket.send_text("pong")
+                print(f"[WS_PING] {term_id}")
+    except WebSocketDisconnect:
+        print(f"[WS_DISCONNECTED] {term_id}")
+        connections.pop(term_id, None)
